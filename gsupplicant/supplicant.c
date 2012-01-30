@@ -134,6 +134,40 @@ static struct strvalmap mode_capa_map[] = {
 	{ }
 };
 
+static struct strvalmap p2p_dev_cap[] = {
+	{ "service-discovery",
+	  G_SUPPLICANT_P2P_DEV_CAPABILITY_SERVICE_DISCOVERY       },
+	{ "client-discoverability",
+	  G_SUPPLICANT_P2P_DEV_CAPABILITY_CLIENT_DISCOVERABILITY  },
+	{ "concurrent-oper",
+	  G_SUPPLICANT_P2P_DEV_CAPABILITY_CONCURRENT_OPER         },
+	{ "infra-managed",
+	  G_SUPPLICANT_P2P_DEV_CAPABILITY_INFRA_MANAGED           },
+	{ "device-limit",
+	  G_SUPPLICANT_P2P_DEV_CAPABILITY_DEVICE_LIMIT            },
+	{ "invitation-procedure",
+	  G_SUPPLICANT_P2P_DEV_CAPABILITY_INVITATION_PROCEDURE    },
+	{ }
+};
+
+static struct strvalmap p2p_group_cap[] = {
+	{ "group-owner",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_GROUP_OWNER        },
+	{ "persisten-group",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_PERSISTENT_GROUP   },
+	{ "group-limit",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_GROUP_LIMIT	       },
+	{ "infra-bss-dist",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_INFRA_BSS_DIST     },
+	{ "cross-conn",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_CROSS_CONN         },
+	{ "persisten-reconn",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_PERSISTENT_RECONN  },
+	{ "group-formation",
+	  G_SUPPLICANT_P2P_GROUP_CAPABILITY_GROUP_FORMATION    },
+	{ }
+};
+
 static GHashTable *interface_table;
 static GHashTable *bss_mapping;
 
@@ -190,8 +224,20 @@ struct g_supplicant_bss {
 	dbus_bool_t ieee8021x;
 };
 
+struct g_supplicant_peer {
+	GSupplicantInterface *interface;
+	char *path;
+	unsigned char pri_dev_type[8];
+	uint8_t p2p_dev_addr[6];
+	unsigned char device_name[512];
+	uint8_t dev_cap;
+	uint8_t group_cap;
+	uint16_t config_method;
+};
+
 struct _GSupplicantNetwork {
 	GSupplicantInterface *interface;
+	GSupplicantNetworkType type;
 	char *path;
 	char *group;
 	char *name;
@@ -268,6 +314,22 @@ static const char *security2string(GSupplicantSecurity security)
 		return "psk";
 	case G_SUPPLICANT_SECURITY_IEEE8021X:
 		return "ieee8021x";
+	}
+
+	return NULL;
+}
+
+static const char *discovery2string(GSupplicantDiscoveryType discovery_type)
+{
+	switch (discovery_type) {
+	case G_SUPPLICANT_DISCOVERY_UNKNOWN:
+		break;
+	case G_SUPPLICANT_DISCOVERY_START_FULL:
+		return "start_with_full";
+	case G_SUPPLICANT_DISCOVERY_SOCIAL:
+		return "social";
+	case G_SUPPLICANT_DISCOVERY_PROGRESSIVE:
+		return "progressive";
 	}
 
 	return NULL;
