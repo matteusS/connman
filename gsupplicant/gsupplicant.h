@@ -221,6 +221,15 @@ int g_supplicant_interface_scan(GSupplicantInterface *interface,
 					GSupplicantInterfaceCallback callback,
 							void *user_data);
 
+int g_supplicant_interface_find(GSupplicantInterface *interface,
+				GSupplicantFindParams *scan_data,
+				GSupplicantInterfaceCallback callback,
+				void *user_data);
+
+int g_supplicant_interface_stop_find(GSupplicantInterface *interface,
+				GSupplicantInterfaceCallback callback,
+				void *user_data);
+
 int g_supplicant_interface_connect(GSupplicantInterface *interface,
 					GSupplicantSSID *ssid,
 					GSupplicantInterfaceCallback callback,
@@ -277,6 +286,8 @@ struct _GSupplicantCallbacks {
 	void (*interface_removed) (GSupplicantInterface *interface);
 	void (*scan_started) (GSupplicantInterface *interface);
 	void (*scan_finished) (GSupplicantInterface *interface);
+	void (*find_started) (GSupplicantInterface *interface);
+	void (*find_finished) (GSupplicantInterface *interface);
 	void (*network_added) (GSupplicantNetwork *network);
 	void (*network_removed) (GSupplicantNetwork *network);
 	void (*network_changed) (GSupplicantNetwork *network,

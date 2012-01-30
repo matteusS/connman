@@ -170,6 +170,7 @@ static struct strvalmap p2p_group_cap[] = {
 
 static GHashTable *interface_table;
 static GHashTable *bss_mapping;
+static GHashTable *peer_mapping;
 
 struct _GSupplicantWpsCredentials {
 	unsigned char ssid[32];
@@ -192,7 +193,9 @@ struct _GSupplicantInterface {
 	GSupplicantState state;
 	dbus_bool_t scanning;
 	GSupplicantInterfaceCallback scan_callback;
+	GSupplicantInterfaceCallback find_callback;
 	void *scan_data;
+	void *find_data;
 	int apscan;
 	char *ifname;
 	char *driver;
@@ -202,6 +205,7 @@ struct _GSupplicantInterface {
 	GHashTable *network_table;
 	GHashTable *net_mapping;
 	GHashTable *bss_mapping;
+	GHashTable *peer_mapping;
 	void *data;
 };
 
@@ -250,6 +254,7 @@ struct _GSupplicantNetwork {
 	GSupplicantSecurity security;
 	dbus_bool_t wps;
 	GHashTable *bss_table;
+	GHashTable *peer_table;
 	GHashTable *config_table;
 };
 
@@ -489,6 +494,7 @@ static void remove_interface(gpointer data)
 	GSupplicantInterface *interface = data;
 
 	g_hash_table_destroy(interface->bss_mapping);
+	g_hash_table_destroy(interface->peer_mapping);
 	g_hash_table_destroy(interface->net_mapping);
 	g_hash_table_destroy(interface->network_table);
 
@@ -507,7 +513,10 @@ static void remove_network(gpointer data)
 {
 	GSupplicantNetwork *network = data;
 
-	g_hash_table_destroy(network->bss_table);
+	if (network->bss_table)
+		g_hash_table_destroy(network->bss_table);
+	if (network->peer_table)
+		g_hash_table_destroy(network->peer_table);
 
 	callback_network_removed(network);
 
@@ -525,6 +534,14 @@ static void remove_bss(gpointer data)
 
 	g_free(bss->path);
 	g_free(bss);
+}
+
+static void remove_peer(gpointer data)
+{
+	struct g_supplicant_peer *peer = data;
+
+	g_free(peer->path);
+	g_free(peer);
 }
 
 static void debug_strvalmap(const char *label, struct strvalmap *map,
@@ -1119,6 +1136,32 @@ static char *create_group(struct g_supplicant_bss *bss)
 	security = security2string(bss->security);
 	if (security != NULL)
 		g_string_append_printf(str, "_%s", security);
+
+	return g_string_free(str, FALSE);
+}
+
+static char *create_group_peer(struct g_supplicant_peer *peer)
+{
+	GString *str;
+	unsigned int i;
+	const char *mode, *security;
+	size_t device_name_size;
+
+	device_name_size = strnlen(peer->device_name, 512);
+	str = g_string_sized_new((device_name_size * 2) + 24);
+	if (str == NULL)
+		return NULL;
+
+	g_string_append_printf(str, "peer_");
+	if (device_name_size > 0 && peer->device_name[0] != '\0') {
+		for (i = 0; i < device_name_size; i++)
+			g_string_append_printf(str, "%02x", peer->device_name[i]);
+	} else {
+		unsigned char *peer_mac = g_strrstr(peer->path, "/") + 1;
+		g_string_append_printf(str, peer_mac);
+	}
+
+	/* TODO: Add more peer information */
 
 	return g_string_free(str, FALSE);
 }
@@ -1736,6 +1779,8 @@ static GSupplicantInterface *interface_alloc(const char *path)
 								NULL, NULL);
 	interface->bss_mapping = g_hash_table_new_full(g_str_hash, g_str_equal,
 								NULL, NULL);
+	interface->peer_mapping = g_hash_table_new_full(g_str_hash, g_str_equal,
+								NULL, NULL);
 
 	g_hash_table_replace(interface_table, interface->path, interface);
 
@@ -2150,6 +2195,196 @@ static void signal_wps_event(const char *path, DBusMessageIter *iter)
 	supplicant_dbus_property_foreach(iter, wps_event_args, interface);
 }
 
+static void add_peer_to_network(struct g_supplicant_peer *peer)
+{
+	GSupplicantInterface *interface = peer->interface;
+	GSupplicantNetwork *network;
+	char *group;
+
+	group = create_group_peer(peer);
+	if (group == NULL)
+		return;
+
+	network = g_hash_table_lookup(interface->network_table, group);
+	if (network != NULL) {
+		g_free(group);
+		goto done;
+	}
+
+	network = g_try_new0(GSupplicantNetwork, 1);
+	if (network == NULL) {
+		g_free(group);
+		return;
+	}
+
+	network->type = G_SUPPLICANT_NETWORK_TYPE_PEER;
+	network->interface = interface;
+	if (network->path == NULL)
+		network->path = g_strdup(peer->path);
+	network->group = group;
+
+	if ((peer->device_name != NULL) && peer->device_name[0] != '\0')
+		network->name = create_name(peer->device_name,
+					    strlen(peer->device_name));
+	else
+		network->name = create_name(peer->path, strlen(peer->path));
+
+	network->wps = FALSE;
+	network->peer_table = g_hash_table_new_full(g_str_hash, g_str_equal,
+							NULL, remove_peer);
+
+	network->config_table = g_hash_table_new_full(g_str_hash, g_str_equal,
+							g_free, g_free);
+
+	g_hash_table_replace(interface->network_table,
+						network->group, network);
+
+	callback_network_added(network);
+
+done:
+
+	g_hash_table_replace(interface->peer_mapping, peer->path, network);
+	g_hash_table_replace(network->peer_table, peer->path, peer);
+
+	g_hash_table_replace(peer_mapping, peer->path, interface);
+}
+
+static void peer_property(const char *key, DBusMessageIter *iter,
+			  void *user_data)
+{
+	struct g_supplicant_peer *peer = user_data;
+
+	if (peer->interface == NULL)
+		return;
+
+	SUPPLICANT_DBG("key %s", key);
+
+	if (key == NULL) {
+		add_peer_to_network(peer);
+		return;
+	}
+
+	if (g_strcmp0(key, "DeviceName") == 0) {
+		unsigned char *name;
+		size_t device_name_len;
+
+		dbus_message_iter_get_basic(iter, &name);
+		device_name_len = strnlen(name, 512);
+
+		memcpy(peer->device_name, name, device_name_len);
+		peer->device_name[device_name_len] = '\0';
+	} else if (g_strcmp0(key, "PrimaryDeviceType") == 0) {
+		DBusMessageIter array;
+		unsigned char *device_type;
+		int type_len;
+
+		dbus_message_iter_recurse(iter, &array);
+		dbus_message_iter_get_fixed_array(&array, &device_type,
+						  &type_len);
+
+		if (type_len > 0 && type_len < 8)
+			memcpy(peer->pri_dev_type, device_type, type_len);
+		else
+			memset(peer->pri_dev_type, 0, sizeof(peer->pri_dev_type));
+	} else if (g_strcmp0(key, "groupcapability") == 0) {
+		uint8_t cap;
+
+		dbus_message_iter_get_basic(iter, &cap);
+		peer->group_cap = cap;
+	} else if (g_strcmp0(key, "devicecapability") == 0) {
+		uint8_t cap;
+
+		dbus_message_iter_get_basic(iter, &cap);
+		peer->dev_cap = cap;
+	} else if (g_strcmp0(key, "config_method") == 0) {
+		dbus_uint16_t config = 0;
+
+		dbus_message_iter_get_basic(iter, &config);
+		peer->config_method = config;
+	} else
+		SUPPLICANT_DBG("key %s type %c",
+				key, dbus_message_iter_get_arg_type(iter));
+}
+
+static struct g_supplicant_peer *interface_peer_added(DBusMessageIter *iter,
+						      void *user_data)
+{
+	GSupplicantInterface *interface = user_data;
+	GSupplicantNetwork *network;
+	struct g_supplicant_peer *peer;
+	const char *path = NULL;
+
+	SUPPLICANT_DBG("");
+
+	dbus_message_iter_get_basic(iter, &path);
+	if (path == NULL)
+		return NULL;
+
+	if (g_strcmp0(path, "/") == 0)
+		return NULL;
+
+	SUPPLICANT_DBG("%s", path);
+	network = g_hash_table_lookup(interface->peer_mapping, path);
+	if (network != NULL) {
+		peer = g_hash_table_lookup(network->peer_table, path);
+		if (peer != NULL)
+			return NULL;
+	}
+
+	peer = g_try_new0(struct g_supplicant_peer, 1);
+	if (peer == NULL)
+		return NULL;
+
+	peer->interface = interface;
+	peer->path = g_strdup(path);
+
+	return peer;
+}
+
+static void interface_peer_added_with_keys(DBusMessageIter *iter,
+						void *user_data)
+{
+	struct g_supplicant_peer *peer;
+
+	SUPPLICANT_DBG("");
+
+	peer = interface_peer_added(iter, user_data);
+	if (peer == NULL)
+		return;
+
+	supplicant_dbus_property_get_all(peer->path,
+				     SUPPLICANT_INTERFACE ".Peer",
+				     peer_property, peer);
+}
+
+static void signal_device_found(const char *path, DBusMessageIter *iter)
+{
+	GSupplicantInterface *interface;
+	const char *peer_path = NULL;
+
+	SUPPLICANT_DBG("");
+
+	interface = g_hash_table_lookup(interface_table, path);
+	if (interface == NULL)
+		return;
+
+	interface_peer_added_with_keys(iter, interface);
+}
+
+static void signal_device_lost(const char *path, DBusMessageIter *iter)
+{
+	GSupplicantInterface *interface;
+	const char *name = NULL;
+
+	SUPPLICANT_DBG("");
+
+	interface = g_hash_table_lookup(interface_table, path);
+	if (interface == NULL)
+		return;
+
+        /* TODO: Remove the service  */
+}
+
 static struct {
 	const char *interface;
 	const char *member;
@@ -2173,6 +2408,8 @@ static struct {
 
 	{ SUPPLICANT_INTERFACE ".Interface.WPS", "Credentials", signal_wps_credentials },
 	{ SUPPLICANT_INTERFACE ".Interface.WPS", "Event",       signal_wps_event       },
+	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "DeviceFound",  signal_device_found },
+	{ SUPPLICANT_INTERFACE ".Interface.P2PDevice", "DeviceLost",   signal_device_lost  },
 
 	{ }
 };
@@ -2296,6 +2533,13 @@ struct interface_scan_data {
 	GSupplicantInterface *interface;
 	GSupplicantInterfaceCallback callback;
 	GSupplicantScanParams *scan_params;
+	void *user_data;
+};
+
+struct interface_find_data {
+	GSupplicantInterface *interface;
+	GSupplicantInterfaceCallback callback;
+	GSupplicantFindParams *find_params;
 	void *user_data;
 };
 
@@ -2572,6 +2816,33 @@ static void interface_scan_result(const char *error,
 	dbus_free(data);
 }
 
+static void interface_find_result(const char *error,
+				DBusMessageIter *iter, void *user_data)
+{
+	struct interface_find_data *data = user_data;
+	if (error != NULL) {
+		SUPPLICANT_DBG("error %s", error);
+
+		if (data->callback != NULL)
+			data->callback(-EIO, data->interface, data->user_data);
+	} else {
+		data->interface->find_callback = data->callback;
+		data->interface->find_data = data->user_data;
+	}
+
+	if (data != NULL && data->find_params != NULL)
+		g_free(data->find_params);
+
+	dbus_free(data);
+}
+
+static void interface_stop_find_result(const char *error,
+				DBusMessageIter *iter, void *user_data)
+{
+	if (error != NULL)
+		SUPPLICANT_DBG("error %s", error);
+}
+
 static void add_scan_frequency(DBusMessageIter *iter, unsigned int freq)
 {
 	DBusMessageIter data;
@@ -2739,6 +3010,112 @@ int g_supplicant_interface_scan(GSupplicantInterface *interface,
 		dbus_free(data);
 
 	return ret;
+}
+
+static void interface_find_params(DBusMessageIter *iter, void *user_data)
+{
+	DBusMessageIter dict;
+	struct interface_find_data *data = user_data;
+
+	supplicant_dbus_dict_open(iter, &dict);
+
+	if (data && data->find_params) {
+		const char *type = discovery2string(
+			data->find_params->discovery_type);
+		supplicant_dbus_dict_append_basic(&dict, "Timeout",
+					DBUS_TYPE_INT32,
+					&data->find_params->timeout);
+		supplicant_dbus_dict_append_basic(&dict, "DiscoveryType",
+						  DBUS_TYPE_STRING, &type);
+
+	}
+
+	supplicant_dbus_dict_close(iter, &dict);
+}
+
+
+int g_supplicant_interface_find(GSupplicantInterface *interface,
+				GSupplicantFindParams *find_data,
+				GSupplicantInterfaceCallback callback,
+				void *user_data)
+{
+	struct interface_find_data *data = NULL;
+	int ret;
+
+	if (interface == NULL)
+		return -EINVAL;
+
+	if (system_available == FALSE)
+		return -EFAULT;
+
+	if (interface->scanning == TRUE)
+		return -EALREADY;
+
+	switch (interface->state) {
+	case G_SUPPLICANT_STATE_AUTHENTICATING:
+	case G_SUPPLICANT_STATE_ASSOCIATING:
+	case G_SUPPLICANT_STATE_ASSOCIATED:
+	case G_SUPPLICANT_STATE_4WAY_HANDSHAKE:
+	case G_SUPPLICANT_STATE_GROUP_HANDSHAKE:
+		return -EBUSY;
+	case G_SUPPLICANT_STATE_UNKNOWN:
+	case G_SUPPLICANT_STATE_DISCONNECTED:
+	case G_SUPPLICANT_STATE_INACTIVE:
+	case G_SUPPLICANT_STATE_SCANNING:
+	case G_SUPPLICANT_STATE_COMPLETED:
+		break;
+	}
+
+	data = dbus_malloc0(sizeof(*data));
+	if (data == NULL)
+		return -ENOMEM;
+
+	data->interface = interface;
+	data->callback = callback;
+	data->user_data = user_data;
+	data->find_params = find_data;
+
+	ret = supplicant_dbus_method_call(interface->path,
+			SUPPLICANT_INTERFACE ".Interface.P2PDevice", "Find",
+			interface_find_params, interface_find_result, data);
+
+	if (ret < 0)
+		dbus_free(data);
+
+	return ret;
+}
+
+int g_supplicant_interface_stop_find(GSupplicantInterface *interface,
+				     GSupplicantInterfaceCallback callback,
+				     void *user_data)
+{
+	if (interface == NULL)
+		return -EINVAL;
+
+	if (system_available == FALSE)
+		return -EFAULT;
+
+	if (interface->scanning == TRUE)
+		return -EALREADY;
+
+	switch (interface->state) {
+	case G_SUPPLICANT_STATE_AUTHENTICATING:
+	case G_SUPPLICANT_STATE_ASSOCIATING:
+	case G_SUPPLICANT_STATE_ASSOCIATED:
+	case G_SUPPLICANT_STATE_4WAY_HANDSHAKE:
+	case G_SUPPLICANT_STATE_GROUP_HANDSHAKE:
+		return -EBUSY;
+	case G_SUPPLICANT_STATE_UNKNOWN:
+	case G_SUPPLICANT_STATE_DISCONNECTED:
+	case G_SUPPLICANT_STATE_INACTIVE:
+	case G_SUPPLICANT_STATE_SCANNING:
+	case G_SUPPLICANT_STATE_COMPLETED:
+		break;
+	}
+
+	return supplicant_dbus_method_call(interface->path,
+			SUPPLICANT_INTERFACE ".Interface.P2PDevice", "StopFind",
+			NULL, interface_stop_find_result, NULL);
 }
 
 static int parse_supplicant_error(DBusMessageIter *iter)
@@ -3431,6 +3808,8 @@ static const char *g_supplicant_rule4 = "type=signal,"
 			"interface=" SUPPLICANT_INTERFACE ".BSS";
 static const char *g_supplicant_rule5 = "type=signal,"
 			"interface=" SUPPLICANT_INTERFACE ".Network";
+static const char *g_supplicant_rule6 = "type=signal,"
+			"interface=" SUPPLICANT_INTERFACE ".Interface.P2PDevice";
 
 static void invoke_introspect_method(void)
 {
@@ -3470,6 +3849,8 @@ int g_supplicant_register(const GSupplicantCallbacks *callbacks)
 
 	bss_mapping = g_hash_table_new_full(g_str_hash, g_str_equal,
 								NULL, NULL);
+	peer_mapping = g_hash_table_new_full(g_str_hash, g_str_equal,
+								NULL, NULL);
 
 	supplicant_dbus_setup(connection);
 
@@ -3479,6 +3860,7 @@ int g_supplicant_register(const GSupplicantCallbacks *callbacks)
 	dbus_bus_add_match(connection, g_supplicant_rule3, NULL);
 	dbus_bus_add_match(connection, g_supplicant_rule4, NULL);
 	dbus_bus_add_match(connection, g_supplicant_rule5, NULL);
+	dbus_bus_add_match(connection, g_supplicant_rule6, NULL);
 	dbus_connection_flush(connection);
 
 	if (dbus_bus_name_has_owner(connection,
@@ -3520,6 +3902,7 @@ void g_supplicant_unregister(const GSupplicantCallbacks *callbacks)
 	SUPPLICANT_DBG("");
 
 	if (connection != NULL) {
+		dbus_bus_remove_match(connection, g_supplicant_rule6, NULL);
 		dbus_bus_remove_match(connection, g_supplicant_rule5, NULL);
 		dbus_bus_remove_match(connection, g_supplicant_rule4, NULL);
 		dbus_bus_remove_match(connection, g_supplicant_rule3, NULL);
@@ -3535,6 +3918,11 @@ void g_supplicant_unregister(const GSupplicantCallbacks *callbacks)
 	if (bss_mapping != NULL) {
 		g_hash_table_destroy(bss_mapping);
 		bss_mapping = NULL;
+	}
+
+	if (peer_mapping != NULL) {
+		g_hash_table_destroy(peer_mapping);
+		peer_mapping = NULL;
 	}
 
 	if (system_available == TRUE)
