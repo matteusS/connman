@@ -4409,6 +4409,10 @@ static connman_bool_t prepare_network(struct connman_service *service)
 	case CONNMAN_NETWORK_TYPE_VENDOR:
 		return FALSE;
 	case CONNMAN_NETWORK_TYPE_WIFI:
+		if (connman_network_get_bool(service->network,
+					     "WiFi.IsP2P") == TRUE)
+			return TRUE;
+
 		if (connman_network_get_blob(service->network, "WiFi.SSID",
 							&ssid_len) == NULL)
 			return FALSE;

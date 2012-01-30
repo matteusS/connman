@@ -755,12 +755,20 @@ static void ssid_init(GSupplicantSSID *ssid, struct connman_network *network)
 
 }
 
+static void peer_init(GSupplicantPeer *peer, struct connman_network *network)
+{
+	memset(peer, 0, sizeof(*peer));
+	peer->path = connman_network_get_string(network, "Path");
+}
+
 static int network_connect(struct connman_network *network)
 {
 	struct connman_device *device = connman_network_get_device(network);
 	struct wifi_data *wifi;
+	connman_bool_t is_peer;
 	GSupplicantInterface *interface;
 	GSupplicantSSID *ssid;
+	GSupplicantPeer *peer;
 
 	DBG("network %p", network);
 
@@ -771,22 +779,35 @@ static int network_connect(struct connman_network *network)
 	if (wifi == NULL)
 		return -ENODEV;
 
-	ssid = g_try_malloc0(sizeof(GSupplicantSSID));
-	if (ssid == NULL)
-		return -ENOMEM;
-
 	interface = wifi->interface;
+	is_peer = connman_network_get_bool(network, "WiFi.IsP2P");
 
-	ssid_init(ssid, network);
+	if (is_peer) {
+		peer = g_try_malloc0(sizeof(GSupplicantPeer));
+		if (peer == NULL)
+			return -ENOMEM;
+
+		peer_init(peer, network);
+	} else {
+		ssid = g_try_malloc0(sizeof(GSupplicantSSID));
+		if (ssid == NULL)
+			return -ENOMEM;
+
+
+		ssid_init(ssid, network);
+	}
 
 	if (wifi->disconnecting == TRUE)
 		wifi->pending_network = network;
 	else {
 		wifi->network = network;
 		wifi->retries = 0;
-
-		return g_supplicant_interface_connect(interface, ssid,
+		if (is_peer == TRUE)
+			return g_supplicant_interface_p2p_connect(interface, peer,
 						connect_callback, network);
+		else
+			return g_supplicant_interface_connect(interface, ssid,
+						    connect_callback, network);
 	}
 
 	return -EINPROGRESS;
@@ -823,6 +844,7 @@ static void disconnect_callback(int result, GSupplicantInterface *interface,
 static int network_disconnect(struct connman_network *network)
 {
 	struct connman_device *device = connman_network_get_device(network);
+	connman_bool_t is_peer;
 	struct wifi_data *wifi;
 	int err;
 
@@ -839,8 +861,13 @@ static int network_disconnect(struct connman_network *network)
 
 	wifi->disconnecting = TRUE;
 
-	err = g_supplicant_interface_disconnect(wifi->interface,
-						disconnect_callback, wifi);
+	is_peer = connman_network_get_bool(network, "WiFi.IsP2P");
+	if (is_peer)
+		err = g_supplicant_interface_p2p_disconnect(wifi->interface,
+						     disconnect_callback, wifi);
+	else
+		err = g_supplicant_interface_disconnect(wifi->interface,
+						     disconnect_callback, wifi);
 	if (err < 0)
 		wifi->disconnecting = FALSE;
 

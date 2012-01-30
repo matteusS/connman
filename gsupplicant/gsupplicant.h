@@ -234,8 +234,15 @@ int g_supplicant_interface_connect(GSupplicantInterface *interface,
 					GSupplicantSSID *ssid,
 					GSupplicantInterfaceCallback callback,
 							void *user_data);
+int g_supplicant_interface_p2p_connect(GSupplicantInterface *interface,
+					GSupplicantPeer *peer,
+					GSupplicantInterfaceCallback callback,
+							void *user_data);
 
 int g_supplicant_interface_disconnect(GSupplicantInterface *interface,
+					GSupplicantInterfaceCallback callback,
+							void *user_data);
+int g_supplicant_interface_p2p_disconnect(GSupplicantInterface *interface,
 					GSupplicantInterfaceCallback callback,
 							void *user_data);
 
@@ -270,6 +277,7 @@ GSupplicantNetworkType g_supplicant_network_get_type(GSupplicantNetwork *network
 const char *g_supplicant_network_get_name(GSupplicantNetwork *network);
 const char *g_supplicant_network_get_identifier(GSupplicantNetwork *network);
 const char *g_supplicant_network_get_path(GSupplicantNetwork *network);
+const char *g_supplicant_network_get_peer_path(GSupplicantNetwork *network);
 const void *g_supplicant_network_get_ssid(GSupplicantNetwork *network,
 							unsigned int *ssid_len);
 const char *g_supplicant_network_get_mode(GSupplicantNetwork *network);
