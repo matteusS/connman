@@ -87,6 +87,7 @@ struct connman_network {
 		char *phase2_auth;
 		connman_bool_t wps;
 		connman_bool_t use_wps;
+		connman_bool_t is_p2p;
 		char *pin_wps;
 	} wifi;
 
@@ -1948,6 +1949,8 @@ int connman_network_set_bool(struct connman_network *network,
 		network->wifi.wps = value;
 	else if (g_strcmp0(key, "WiFi.UseWPS") == 0)
 		network->wifi.use_wps = value;
+	else if (g_strcmp0(key, "WiFi.IsP2P") == 0)
+		network->wifi.is_p2p = value;
 
 	return -EINVAL;
 }
@@ -1970,6 +1973,8 @@ connman_bool_t connman_network_get_bool(struct connman_network *network,
 		return network->wifi.wps;
 	else if (g_str_equal(key, "WiFi.UseWPS") == TRUE)
 		return network->wifi.use_wps;
+	else if (g_str_equal(key, "WiFi.IsP2P") == TRUE)
+		return network->wifi.is_p2p;
 
 	return FALSE;
 }

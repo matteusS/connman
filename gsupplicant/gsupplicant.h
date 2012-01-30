@@ -78,11 +78,28 @@ extern "C" {
 #define G_SUPPLICANT_WPS_PIN            (1 << 2)
 #define G_SUPPLICANT_WPS_REGISTRAR      (1 << 3)
 
+#define G_SUPPLICANT_P2P_DEV_CAPABILITY_SERVICE_DISCOVERY       (1 << 0)
+#define G_SUPPLICANT_P2P_DEV_CAPABILITY_CLIENT_DISCOVERABILITY  (1 << 1)
+#define G_SUPPLICANT_P2P_DEV_CAPABILITY_CONCURRENT_OPER         (1 << 2)
+#define G_SUPPLICANT_P2P_DEV_CAPABILITY_INFRA_MANAGED           (1 << 3)
+#define G_SUPPLICANT_P2P_DEV_CAPABILITY_DEVICE_LIMIT            (1 << 4)
+#define G_SUPPLICANT_P2P_DEV_CAPABILITY_INVITATION_PROCEDURE    (1 << 5)
+
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_GROUP_OWNER           (1 << 0)
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_PERSISTENT_GROUP      (1 << 1)
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_GROUP_LIMIT           (1 << 2)
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_INFRA_BSS_DIST        (1 << 3)
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_CROSS_CONN            (1 << 4)
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_PERSISTENT_RECONN     (1 << 5)
+#define G_SUPPLICANT_P2P_GROUP_CAPABILITY_GROUP_FORMATION       (1 << 6)
+
 typedef enum {
 	G_SUPPLICANT_MODE_UNKNOWN,
 	G_SUPPLICANT_MODE_INFRA,
 	G_SUPPLICANT_MODE_IBSS,
 	G_SUPPLICANT_MODE_MASTER,
+	G_SUPPLICANT_MODE_GO,
+	G_SUPPLICANT_MODE_PEER,
 } GSupplicantMode;
 
 typedef enum {
@@ -108,10 +125,23 @@ typedef enum {
 } GSupplicantState;
 
 typedef enum {
+	G_SUPPLICANT_DISCOVERY_UNKNOWN,
+	G_SUPPLICANT_DISCOVERY_START_FULL,
+	G_SUPPLICANT_DISCOVERY_SOCIAL,
+	G_SUPPLICANT_DISCOVERY_PROGRESSIVE,
+} GSupplicantDiscoveryType;
+
+typedef enum {
 	G_SUPPLICANT_WPS_STATE_UNKNOWN,
 	G_SUPPLICANT_WPS_STATE_SUCCESS,
 	G_SUPPLICANT_WPS_STATE_FAIL,
 } GSupplicantWpsState;
+
+typedef enum {
+	G_SUPPLICANT_NETWORK_TYPE_SSID,
+	G_SUPPLICANT_NETWORK_TYPE_PEER,
+	G_SUPPLICANT_NETWORK_TYPE_UNKNOWN
+} GSupplicantNetworkType;
 
 struct _GSupplicantSSID {
 	const void *ssid;
@@ -143,6 +173,16 @@ struct scan_ssid {
 	uint8_t ssid_len;
 };
 
+struct _GSupplicantPeer {
+	const char *path;
+	GSupplicantMode mode;
+	GSupplicantSecurity security;
+	unsigned int freq;
+	dbus_bool_t use_wps;
+};
+
+typedef struct _GSupplicantPeer GSupplicantPeer;
+
 struct _GSupplicantScanParams {
 	GSList *ssids;
 
@@ -152,6 +192,13 @@ struct _GSupplicantScanParams {
 };
 
 typedef struct _GSupplicantScanParams GSupplicantScanParams;
+
+struct _GSupplicantFindParams {
+	uint32_t timeout;
+	GSupplicantDiscoveryType discovery_type;
+};
+
+typedef struct _GSupplicantFindParams GSupplicantFindParams;
 
 /* global API */
 typedef void (*GSupplicantCountryCallback) (int result,
@@ -228,6 +275,7 @@ struct _GSupplicantNetwork;
 typedef struct _GSupplicantNetwork GSupplicantNetwork;
 
 GSupplicantInterface *g_supplicant_network_get_interface(GSupplicantNetwork *network);
+GSupplicantNetworkType g_supplicant_network_get_type(GSupplicantNetwork *network);
 const char *g_supplicant_network_get_name(GSupplicantNetwork *network);
 const char *g_supplicant_network_get_identifier(GSupplicantNetwork *network);
 const char *g_supplicant_network_get_path(GSupplicantNetwork *network);
