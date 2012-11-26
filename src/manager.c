@@ -220,6 +220,18 @@ static DBusMessage *get_services(DBusConnection *conn,
 	return reply;
 }
 
+static DBusMessage *get_known_services(DBusConnection *conn,
+					DBusMessage *msg, void *data)
+{
+	DBusMessage *reply;
+
+	reply = dbus_message_new_method_return(msg);
+	if (reply == NULL)
+		return NULL;
+
+	return reply;
+}
+
 static DBusMessage *connect_provider(DBusConnection *conn,
 					DBusMessage *msg, void *data)
 {
@@ -415,6 +427,9 @@ static const GDBusMethodTable manager_methods[] = {
 	{ GDBUS_METHOD("GetServices",
 			NULL, GDBUS_ARGS({ "services", "a(oa{sv})" }),
 			get_services) },
+	{ GDBUS_METHOD("GetKnownServices",
+			NULL, GDBUS_ARGS({ "services", "a(ao{sv})" }),
+			get_known_services) },
 	{ GDBUS_DEPRECATED_ASYNC_METHOD("ConnectProvider",
 			      GDBUS_ARGS({ "provider", "a{sv}" }),
 			      GDBUS_ARGS({ "path", "o" }),
