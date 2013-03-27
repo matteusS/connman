@@ -52,6 +52,8 @@ Allowed fields:
   interface is used. The byte values must have prefix 0 added,
   the bytes must be separated by ":" char and its length must be
   exactly 2 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2 = 17 characters.
+- Interface: Name of the interface to configure. If MAC is also set it must
+  be the MAC address of the specified interface.
 - Nameservers: Comma separated list of nameservers
 - SearchDomains: Comma separated list of DNS search domains
 - Timeservers: Comma separated list of timeservers

@@ -66,6 +66,7 @@ struct connman_config_service {
 	char *ipv6_gateway;
 	char *ipv6_privacy;
 	char *mac;
+	char *interface;
 	char **nameservers;
 	char **search_domains;
 	char **timeservers;
@@ -108,6 +109,7 @@ static connman_bool_t cleanup = FALSE;
 #define SERVICE_KEY_IPv6               "IPv6"
 #define SERVICE_KEY_IPv6_PRIVACY       "IPv6.Privacy"
 #define SERVICE_KEY_MAC                "MAC"
+#define SERVICE_KEY_INTERFACE          "Interface"
 #define SERVICE_KEY_NAMESERVERS        "Nameservers"
 #define SERVICE_KEY_SEARCH_DOMAINS     "SearchDomains"
 #define SERVICE_KEY_TIMESERVERS        "Timeservers"
@@ -236,6 +238,7 @@ free_only:
 	g_free(config_service->ipv6_gateway);
 	g_free(config_service->ipv6_privacy);
 	g_free(config_service->mac);
+	g_free(config_service->interface);
 	g_strfreev(config_service->nameservers);
 	g_strfreev(config_service->search_domains);
 	g_strfreev(config_service->timeservers);
@@ -471,6 +474,12 @@ static connman_bool_t load_service_generic(GKeyFile *keyfile,
 	if (str != NULL) {
 		g_free(service->mac);
 		service->mac = str;
+	}
+
+	str = g_key_file_get_string(keyfile, group, SERVICE_KEY_INTERFACE, NULL);
+	if (str != NULL) {
+		g_free(service->interface);
+		service->interface = str;
 	}
 
 	str = g_key_file_get_string(keyfile, group, SERVICE_KEY_DOMAIN, NULL);
@@ -1091,6 +1100,24 @@ static void provision_service(gpointer key, gpointer value,
 		DBG("wants %s has %s", config->mac, device_addr);
 
 		if (g_ascii_strcasecmp(device_addr, config->mac) != 0)
+			return;
+	}
+
+	if (config->interface != NULL) {
+		struct connman_device *device;
+		const char *device_interface;
+
+		device = connman_network_get_device(network);
+		if (device == NULL) {
+			connman_error("Network device is missing");
+			return;
+		}
+
+		device_interface = connman_device_get_string(device, "Interface");
+
+		DBG("wants %s has %s", config->interface, device_interface);
+
+		if (g_ascii_strcasecmp(device_interface, config->interface) != 0)
 			return;
 	}
 
