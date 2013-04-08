@@ -508,6 +508,7 @@ static void hidden_free(struct hidden_params *hidden)
 static void scan_callback(int result, GSupplicantInterface *interface,
 						void *user_data)
 {
+	int ret;
 	struct connman_device *device = user_data;
 	struct wifi_data *wifi = connman_device_get_data(device);
 
@@ -526,6 +527,19 @@ static void scan_callback(int result, GSupplicantInterface *interface,
 
 	if (result != -ENOLINK)
 		start_autoscan(device);
+
+	connman_device_unref(device);
+
+	ret = g_supplicant_interface_stop_find(interface, NULL, NULL);
+	DBG("stop find result %d", ret);
+}
+
+static void find_callback(int result, GSupplicantInterface *interface,
+						  void *user_data)
+{
+	struct connman_device *device = user_data;
+
+	DBG("result %d", result);
 
 	connman_device_unref(device);
 }
@@ -930,7 +944,7 @@ static int wifi_scan(struct connman_device *device,
 	GSupplicantScanParams *scan_params = NULL;
 	struct scan_ssid *scan_ssid;
 	struct hidden_params *hidden;
-	int ret;
+	int ret, p2p_ret;
 	int driver_max_ssids = 0;
 	connman_bool_t do_hidden;
 
@@ -1017,6 +1031,12 @@ static int wifi_scan(struct connman_device *device,
 			wifi->hidden = NULL;
 		}
 	}
+
+	connman_device_ref(device);
+	p2p_ret = g_supplicant_interface_find(wifi->interface, NULL,
+					      find_callback, device);
+	if (p2p_ret != 0)
+		connman_device_unref(device);
 
 	return ret;
 }
@@ -1619,6 +1639,16 @@ static void scan_finished(GSupplicantInterface *interface)
 	DBG("");
 }
 
+static void find_started(GSupplicantInterface *interface)
+{
+	DBG("");
+}
+
+static void find_finished(GSupplicantInterface *interface)
+{
+	DBG("");
+}
+
 static unsigned char calculate_strength(GSupplicantNetwork *supplicant_network)
 {
 	unsigned char strength;
@@ -1635,13 +1665,14 @@ static void network_added(GSupplicantNetwork *supplicant_network)
 	struct connman_network *network;
 	GSupplicantInterface *interface;
 	struct wifi_data *wifi;
-	const char *name, *identifier, *security, *group, *mode;
+	const char *name, *identifier, *security, *group, *mode, *peer_path;
 	const unsigned char *ssid;
 	unsigned int ssid_len;
 	connman_bool_t wps;
 	connman_bool_t wps_pbc;
 	connman_bool_t wps_ready;
 	connman_bool_t wps_advertizing;
+	connman_bool_t peer;
 
 	DBG("");
 
@@ -1657,6 +1688,9 @@ static void network_added(GSupplicantNetwork *supplicant_network)
 	wps_advertizing = g_supplicant_network_is_wps_advertizing(
 							supplicant_network);
 	mode = g_supplicant_network_get_mode(supplicant_network);
+	peer = (g_supplicant_network_get_type(supplicant_network) ==
+		G_SUPPLICANT_NETWORK_TYPE_PEER) ? TRUE : FALSE;
+	peer_path = g_supplicant_network_get_peer_path(supplicant_network);
 
 	if (wifi == NULL)
 		return;
@@ -1684,6 +1718,8 @@ static void network_added(GSupplicantNetwork *supplicant_network)
 	if (name != NULL && name[0] != '\0')
 		connman_network_set_name(network, name);
 
+	connman_network_set_string(network, "Path", peer_path);
+	connman_network_set_bool(network, "WiFi.IsP2P", peer);
 	connman_network_set_blob(network, "WiFi.SSID",
 						ssid, ssid_len);
 	connman_network_set_string(network, "WiFi.Security", security);
@@ -1792,6 +1828,8 @@ static const GSupplicantCallbacks callbacks = {
 	.interface_removed	= interface_removed,
 	.scan_started		= scan_started,
 	.scan_finished		= scan_finished,
+	.find_started		= find_started,
+	.find_finished		= find_finished,
 	.network_added		= network_added,
 	.network_removed	= network_removed,
 	.network_changed	= network_changed,
